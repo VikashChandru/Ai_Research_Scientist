@@ -1,0 +1,16 @@
+# Sandbox image used to run LLM-generated experiment scripts in isolation.
+# Build once with:
+#   docker build -t ai-research-sandbox:latest -f Dockerfile.sandbox .
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    pandas==2.2.3 \
+    scipy==1.14.1 \
+    scikit-learn==1.5.2 \
+    matplotlib==3.9.2
+
+WORKDIR /workspace
+
+# No ENTRYPOINT/CMD needed: sandbox.py invokes
+#   docker run --network none -v <workspace>:/workspace ai-research-sandbox python script.py
