@@ -1,186 +1,640 @@
 # AI Research Scientist
 
-A single Streamlit app that autonomously:
+An autonomous research assistant that takes a research question from idea to evidence-backed report.
 
-1. **Plans** a research approach from your question (Grok / xAI)
-2. **Searches & reads** papers (OpenAlex) + any PDFs/CSVs you upload
-3. **Builds & queries a knowledge graph** (Neo4j AuraDB) of papers, concepts,
-   hypotheses, experiments, and critiques
-4. **Generates hypotheses** grounded in that evidence (local embeddings +
-   vector search pick the most relevant passages)
-5. **Runs small Python experiments** in an isolated Docker sandbox
-6. **Critiques** each result and iterates (revises the experiment) if needed
-7. **Writes a final report** with in-text citations, a reference list, and a
-   full provenance log (every search, KG write, and sandbox run is recorded)
+The system combines **LLMs, academic literature retrieval, semantic search, knowledge graphs, and sandboxed Python experimentation** into a single Streamlit application. Instead of only generating an answer, it follows a structured research workflow: it plans the investigation, retrieves relevant literature, forms hypotheses, tests them computationally, critiques the results, and produces a cited report with a provenance trail.
 
-No React/Next.js/TypeScript/FastAPI — just Python + Streamlit.
+## What it does
 
----
+Given a research question, the system can:
 
-## ⚠️ About the credentials you pasted in chat
+* Break the question into research subproblems and search queries
+* Retrieve relevant academic papers through **OpenAlex**
+* Accept additional **PDF and CSV documents** as user-provided evidence
+* Generate local semantic embeddings using **Sentence Transformers**
+* Retrieve relevant evidence through vector similarity
+* Build and query a persistent **Neo4j AuraDB knowledge graph**
+* Generate specific and testable research hypotheses
+* Turn hypotheses into small Python experiments
+* Execute experiments inside an isolated **Docker sandbox**
+* Critique experimental results and revise broken experiments
+* Produce a final research report with citations and limitations
+* Maintain a timestamped **provenance log** of searches, graph operations, experiments, and critiques
 
-You shared a live Neo4j AuraDB password and an OpenAlex key directly in our
-conversation. Treat that Neo4j password as **compromised** the moment it's
-been typed anywhere outside your own machine — I'd recommend resetting it
-from https://console.neo4j.io (Instance → Reset password) once you're set up,
-even though only you and I have seen it here.
-
-This project **never hard-codes any credential**. `.env.example` contains
-only placeholders. You will paste your real values into your own local
-`.env` file in Step 4 below — that file is never uploaded anywhere and is
-excluded from version control by `.gitignore`.
+The application is intentionally lightweight: it uses **Python + Streamlit** rather than a separate frontend/backend stack.
 
 ---
 
-## Project layout
+## Research workflow
 
+```text
+Research Question
+       │
+       ▼
+┌───────────────┐
+│     PLAN      │
+│ LLM generates │
+│ research plan │
+└───────┬───────┘
+        │
+        ▼
+┌────────────────┐
+│    RESEARCH    │
+│ OpenAlex +     │
+│ uploaded files │
+└───────┬────────┘
+        │
+        ├──────────────► Sentence Transformers
+        │                 semantic embeddings
+        │
+        └──────────────► Neo4j Knowledge Graph
+                         papers / concepts
+        │
+        ▼
+┌────────────────┐
+│  HYPOTHESIZE   │
+│ Evidence + KG  │
+│ context → LLM  │
+└───────┬────────┘
+        │
+        ▼
+┌────────────────┐
+│   EXPERIMENT   │
+│ Generated      │
+│ Python code    │
+└───────┬────────┘
+        │
+        ▼
+┌────────────────┐
+│    CRITIQUE    │
+│ Check results  │
+│ and revise     │
+└───────┬────────┘
+        │
+        ▼
+┌────────────────┐
+│     REPORT     │
+│ Findings +     │
+│ citations +    │
+│ provenance     │
+└────────────────┘
 ```
+
+The important distinction is that the LLM is used for **planning, hypothesis generation, experiment generation, critique, and reporting**, while literature retrieval, semantic matching, graph operations, and experiment execution are handled by dedicated program components.
+
+---
+
+## Architecture
+
+```text
+                         ┌──────────────────┐
+                         │   Streamlit UI   │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                       ┌─────────────────────┐
+                       │    Orchestrator     │
+                       └─────────┬───────────┘
+                                 │
+             ┌───────────────────┼────────────────────┐
+             │                   │                    │
+             ▼                   ▼                    ▼
+       ┌──────────┐       ┌────────────┐       ┌─────────────┐
+       │ Planner  │       │ Researcher │       │  Reporter   │
+       └────┬─────┘       └─────┬──────┘       └─────────────┘
+            │                   │
+            ▼                   ├──────────► OpenAlex
+          LLM                   │
+                                ├──────────► Sentence Transformers
+                                │
+                                └──────────► Neo4j AuraDB
+                                             │
+                                             ▼
+                                      Knowledge Graph
+                                     
+                         ┌──────────────────────────┐
+                         │      Hypothesis Engine   │
+                         └────────────┬─────────────┘
+                                      │
+                                      ▼
+                         ┌──────────────────────────┐
+                         │   Experiment + Critique  │
+                         └────────────┬─────────────┘
+                                      │
+                                      ▼
+                              Docker Sandbox
+```
+
+### Main components
+
+| Component                 | Purpose                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| **Streamlit**             | User interface and application entry point                                     |
+| **LLM / Grok**            | Planning, hypothesis generation, experiment generation, critique and reporting |
+| **OpenAlex**              | Academic paper discovery and metadata                                          |
+| **Sentence Transformers** | Local semantic embeddings                                                      |
+| **NumPy**                 | Cosine-similarity based vector retrieval                                       |
+| **Neo4j AuraDB**          | Persistent research knowledge graph                                            |
+| **Docker**                | Isolated experiment execution                                                  |
+| **Python**                | Data processing, orchestration and experiments                                 |
+
+---
+
+## Knowledge graph
+
+The research state is represented as a graph rather than only as a collection of documents.
+
+The current schema contains five main entity types:
+
+```text
+Paper
+Concept
+Hypothesis
+Experiment
+Critique
+```
+
+with relationships such as:
+
+```text
+Paper ──HAS_CONCEPT──► Concept
+
+Hypothesis ──BASED_ON──► Paper
+
+Experiment ──TESTS──► Hypothesis
+
+Critique ──EVALUATES──► Experiment
+```
+
+This allows the system to preserve relationships between literature, concepts, hypotheses, experiments, and their critiques across research sessions.
+
+---
+
+## Evidence retrieval
+
+The system uses a local **Sentence Transformer** model to represent research text as numerical embeddings.
+
+For retrieved papers and uploaded documents:
+
+```text
+Paper / Document
+      │
+      ▼
+Text extraction
+      │
+      ▼
+Chunking
+      │
+      ▼
+all-MiniLM-L6-v2
+      │
+      ▼
+384-dimensional embedding
+      │
+      ▼
+Vector similarity search
+      │
+      ▼
+Relevant evidence
+```
+
+The original text is retained alongside its embedding. The embedding is used to determine which pieces of evidence are relevant; the selected **original text** is then supplied to the LLM as research context.
+
+This keeps semantic retrieval separate from generation.
+
+---
+
+## Hypothesis generation
+
+Once relevant evidence has been retrieved, the hypothesis stage combines:
+
+* The original research question
+* Relevant literature passages
+* Retrieved user-provided evidence
+* Knowledge-graph context
+
+The LLM is then asked to produce hypotheses that are:
+
+* Specific
+* Falsifiable
+* Grounded in retrieved evidence
+* Suitable for computational testing
+
+A quality-control step filters hypotheses before they reach the experiment stage.
+
+---
+
+## Experimentation
+
+The system can convert a retained hypothesis into a small, self-contained Python experiment.
+
+Experiments are restricted to numerical/statistical Python tooling such as:
+
+```text
+NumPy
+Pandas
+SciPy
+scikit-learn
+Matplotlib
+```
+
+When Docker is available, experiments run inside a dedicated sandbox with:
+
+* No network access
+* Memory limits
+* CPU limits
+* Execution timeout
+* Structured output requirements
+
+The experiment is expected to produce an `output.json` result that can be passed to the critique stage.
+
+If Docker is unavailable, the application can fall back to a local Python subprocess with a timeout. The interface identifies this execution as unsandboxed.
+
+---
+
+## Critique and revision
+
+The system does not simply accept the first experiment result.
+
+The critique stage receives the:
+
+* Hypothesis
+* Generated experiment code
+* Standard output
+* Standard error
+* Experiment output
+
+The LLM evaluates the result and returns a structured verdict:
+
+```text
+supported
+refuted
+inconclusive
+experiment_broken
+```
+
+If the experiment is considered broken, the critique can provide revision instructions. The experiment can then be regenerated and executed again, up to the configured retry limit.
+
+---
+
+## Provenance
+
+Every research run maintains a provenance record.
+
+The log captures events such as:
+
+```text
+Research query
+    ↓
+OpenAlex search
+    ↓
+Retrieved papers
+    ↓
+Knowledge graph writes
+    ↓
+Hypothesis generation
+    ↓
+Sandbox execution
+    ↓
+Critique
+    ↓
+Final report
+```
+
+Each event is timestamped, allowing the final report to be traced back to the searches, evidence, graph operations, and experiments that produced it.
+
+The provenance log can be downloaded from the application after a research run.
+
+---
+
+# Project structure
+
+```text
 ai-research-scientist/
-├── app.py                  <- streamlit run app.py (entry point)
-├── check_setup.py          <- run this first to test all credentials
+│
+├── app.py
+├── check_setup.py
 ├── requirements.txt
-├── .env.example             <- copy to .env and fill in your real values
-├── Dockerfile.sandbox        <- image used to run experiments in isolation
+├── .env.example
+├── Dockerfile.sandbox
 ├── README.md
+│
 └── src/
-    ├── config.py             <- loads .env
-    ├── grok_client.py         <- xAI/Grok chat wrapper
-    ├── openalex_client.py     <- paper search
-    ├── pdf_utils.py           <- PDF/text extraction + chunking
-    ├── embeddings.py          <- local sentence-transformers embedder
-    ├── vector_store.py        <- in-memory vector search
-    ├── neo4j_client.py        <- knowledge graph read/write
-    ├── sandbox.py             <- Docker (or local fallback) experiment runner
-    ├── utils.py               <- ids + provenance log
+    ├── __init__.py
+    ├── config.py
+    ├── embeddings.py
+    ├── grok_client.py
+    ├── neo4j_client.py
+    ├── openalex_client.py
+    ├── pdf_utils.py
+    ├── sandbox.py
+    ├── utils.py
+    ├── vector_store.py
+    │
     └── agent/
-        ├── planner.py         <- Stage 1: research plan
-        ├── researcher.py      <- Stage 2: search + ingest + KG population
-        ├── hypothesis.py      <- Stage 3: hypothesis generation
-        ├── experimenter.py    <- Stage 4/5: run + critique experiments
-        ├── reporter.py        <- Stage 6: final cited report
-        └── orchestrator.py    <- ties every stage together
+        ├── __init__.py
+        ├── planner.py
+        ├── researcher.py
+        ├── hypothesis.py
+        ├── experimenter.py
+        ├── reporter.py
+        └── orchestrator.py
+```
+
+### Agent modules
+
+**`planner.py`**
+Creates the research plan, including subquestions, literature searches and experiment directions.
+
+**`researcher.py`**
+Runs literature searches, processes retrieved documents, performs embedding-based retrieval and populates the knowledge graph.
+
+**`hypothesis.py`**
+Uses retrieved evidence and graph context to generate and quality-check research hypotheses.
+
+**`experimenter.py`**
+Generates experiments, executes them and coordinates the critique/revision loop.
+
+**`reporter.py`**
+Produces the final research report and manages references.
+
+**`orchestrator.py`**
+Coordinates the complete research workflow.
+
+---
+
+# Getting started
+
+## Requirements
+
+* Python 3.11+
+* Neo4j AuraDB
+* xAI API access
+* OpenAlex
+* Docker Desktop *(recommended for sandboxed experiments)*
+
+The application can still run without Docker, but experiments will use the local subprocess fallback.
+
+---
+
+## 1. Clone the repository
+
+```powershell
+git clone https://github.com/VikashChandru/Ai_Research_Scientist.git
+cd Ai_Research_Scientist
 ```
 
 ---
 
-## Windows 11 setup (exact steps)
+## 2. Create a virtual environment
 
-### 1. Install Python 3.11+
-Download from https://www.python.org/downloads/ and **check "Add python.exe
-to PATH"** during install. Verify in PowerShell:
+### Windows
+
 ```powershell
-python --version
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
-### 2. Unzip the project
-Extract the zip anywhere, e.g. `C:\Users\<you>\ai-research-scientist`, then
-open PowerShell in that folder:
-```powershell
-cd C:\Users\<you>\ai-research-scientist
+You should see:
+
+```text
+(.venv)
 ```
 
-### 3. Create and activate a virtual environment
-```powershell
-python -m venv venv
-venv\Scripts\activate
-```
-(You should now see `(venv)` at the start of your PowerShell prompt.)
+at the beginning of your terminal prompt.
 
-### 4. Install dependencies
+---
+
+## 3. Install dependencies
+
 ```powershell
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
-This also pulls in `sentence-transformers`/`torch` (a few hundred MB) for
-local embeddings — it happens once.
 
-### 5. Configure your credentials
+The first installation can take some time because the project uses PyTorch and Sentence Transformers for local embeddings.
+
+---
+
+## 4. Configure environment variables
+
+Create your local environment file:
+
 ```powershell
 copy .env.example .env
+```
+
+Then open it:
+
+```powershell
 notepad .env
 ```
-Fill in:
-- `XAI_API_KEY` — your xAI/Grok API key
-- `GROK_MODEL` — leave as `grok-4-fast`, or change to whatever model name
-  your xAI account has access to (check https://console.x.ai)
-- `OPENALEX_EMAIL` — your email (free, just puts you in the faster "polite pool")
-- `OPENALEX_API_KEY` — your OpenAlex key, if you have one (optional)
-- `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` — from
-  your AuraDB instance details page
-Save and close Notepad.
 
-### 6. Install Docker Desktop (recommended, not required)
-Download from https://www.docker.com/products/docker-desktop/, install, and
-launch it once so the Docker daemon is running (whale icon in the system
-tray). This gives experiments a real sandbox (`--network none`, memory/CPU
-limits). **If you skip this**, the app still works — experiments just run as
-an unsandboxed local Python subprocess instead, and the UI will clearly say so.
+Configure the required values:
 
-If you do install Docker, build the sandbox image once:
+```text
+XAI_API_KEY=your_xai_api_key
+GROK_MODEL=your_model_name
+
+OPENALEX_EMAIL=your_email
+OPENALEX_API_KEY=your_openalex_key
+
+NEO4J_URI=your_neo4j_uri
+NEO4J_USERNAME=your_neo4j_username
+NEO4J_PASSWORD=your_neo4j_password
+NEO4J_DATABASE=your_neo4j_database
+```
+
+**Do not commit `.env` to Git.**
+
+The repository includes `.env.example` so that required configuration variables can be seen without exposing credentials.
+
+---
+
+## 5. Set up Docker
+
+Docker is recommended because it provides an isolated environment for generated experiments.
+
+After installing and starting Docker Desktop:
+
 ```powershell
 docker build -t ai-research-sandbox:latest -f Dockerfile.sandbox .
 ```
 
-### 7. Verify everything before the first real run
+You only need to build the image again when `Dockerfile.sandbox` changes.
+
+---
+
+## 6. Check the setup
+
+Before running the application:
+
 ```powershell
 python check_setup.py
 ```
-This checks Grok, OpenAlex, Neo4j, Docker, and the local embedding model one
-at a time and tells you exactly what's wrong if anything fails. **Note:** a
-freshly created/resumed AuraDB instance can take up to ~60 seconds to become
-reachable — if the Neo4j check fails immediately after setup, wait a minute
-and re-run this script, or check https://console.neo4j.io.
 
-### 8. Run the app
+The setup check verifies the main dependencies and services, including:
+
+* LLM connection
+* OpenAlex access
+* Neo4j connection
+* Docker availability
+* Local embedding model
+
+If Neo4j was just created or resumed, it may take a short time before the instance accepts connections.
+
+---
+
+## 7. Start the application
+
 ```powershell
 streamlit run app.py
 ```
-Your browser opens to `http://localhost:8501`. Enter a research question,
-optionally upload PDFs/CSVs, and click **Run autonomous research**.
+
+Then open:
+
+```text
+http://localhost:8501
+```
+
+Enter a research question, optionally upload supporting documents, and start the autonomous research workflow.
 
 ---
 
-## How it works, stage by stage
+# Configuration
 
-| Stage | What happens |
-|---|---|
-| Plan | Grok breaks your question into subquestions, search queries, and experiment types |
-| Research | OpenAlex is searched for each query; abstracts + any uploaded documents are chunked, embedded locally, and stored in an in-memory vector index; papers and extracted concepts are written into Neo4j |
-| Hypothesize | The question is embedded and matched against the vector index; the retrieved evidence + a KG summary are sent to Grok, which proposes falsifiable, experiment-ready hypotheses (each linked to its source papers in the KG) |
-| Experiment | Grok writes a small, self-contained Python script per hypothesis (numpy/pandas/scipy/sklearn/matplotlib only, no network); it runs inside the Docker sandbox (or the local fallback) with a timeout, and must write `output.json` |
-| Critique | Grok reviews the code + stdout/stderr/output and returns a verdict (supported / refuted / inconclusive / experiment_broken), a confidence score, and — if the experiment was flawed — revision instructions; the loop retries up to `MAX_EXPERIMENT_RETRIES` times |
-| Report | Grok drafts the narrative (executive summary, related work, per-hypothesis findings, limitations, next steps) citing only the reference numbers you actually retrieved; the reference list itself is built from OpenAlex metadata, not generated by the model |
+The main runtime limits can be adjusted through `.env`.
 
-Every action (each search query run, each KG write, each sandbox execution,
-each critique verdict) is timestamped and recorded in the **provenance log**,
-downloadable as JSON from the app after a run — this is what gives the final
-report its audit trail.
+| Variable                  | Default | Purpose                                     |
+| ------------------------- | ------: | ------------------------------------------- |
+| `MAX_SEARCH_QUERIES`      |     `4` | Maximum literature searches                 |
+| `MAX_PAPERS_PER_QUERY`    |     `8` | Maximum papers retrieved per query          |
+| `MAX_HYPOTHESES`          |     `3` | Maximum hypotheses sent for experimentation |
+| `MAX_EXPERIMENT_RETRIES`  |     `2` | Maximum experiment revision attempts        |
+| `SANDBOX_TIMEOUT_SECONDS` |    `60` | Maximum experiment runtime                  |
+
+Reducing these values makes research runs faster and reduces API usage. Increasing them allows broader searches and more experimentation.
 
 ---
 
-## Tuning limits / cost control
+# Example research flow
 
-All in `.env`:
-- `MAX_SEARCH_QUERIES` (default 4) / `MAX_PAPERS_PER_QUERY` (default 8) — literature breadth
-- `MAX_HYPOTHESES` (default 3) — how many hypotheses get full experiments
-- `MAX_EXPERIMENT_RETRIES` (default 2) — how many times a broken experiment gets revised
-- `SANDBOX_TIMEOUT_SECONDS` (default 60) — wall-clock limit per experiment run
+A typical run looks like:
 
-Lower these if you want a faster/cheaper run; raise them for a deeper one.
+```text
+"What factors influence inventory risk in market making?"
+                         │
+                         ▼
+                 Research planning
+                         │
+                         ▼
+             Academic literature search
+                         │
+                         ▼
+               Evidence retrieval
+                         │
+                         ▼
+               Knowledge graph update
+                         │
+                         ▼
+              Hypothesis generation
+                         │
+                         ▼
+              Hypothesis quality check
+                         │
+                         ▼
+             Python experiment generation
+                         │
+                         ▼
+                Docker sandbox run
+                         │
+                         ▼
+                   LLM critique
+                         │
+                  ┌──────┴──────┐
+                  │             │
+               Broken?        Valid
+                  │             │
+                  ▼             ▼
+               Revise        Report
+                  │
+                  └──────► Retry
+```
+
+The final output combines the experimental findings with the retrieved literature and provides references and a provenance record for the research process.
 
 ---
 
-## Troubleshooting
+# Design principles
 
-- **`ModuleNotFoundError` on startup** — you likely forgot to activate the
-  venv (`venv\Scripts\activate`) or run `pip install -r requirements.txt`.
-- **Neo4j connection errors** — run `python check_setup.py`; wait ~60s after
-  instance creation/resume; confirm the URI starts with `neo4j+s://`.
-- **Grok/xAI errors mentioning the model name** — your account may not have
-  access to the default model string; check available models at
-  https://console.x.ai and update `GROK_MODEL` in `.env`.
-- **Docker errors like "Unable to find image"** — run the `docker build`
-  command from Step 6; until then, the app automatically falls back to local
-  (unsandboxed) execution.
-- **Everything seems slow the first time** — the embedding model and Docker
-  image both download once; subsequent runs are much faster.
+### Ground generation in evidence
+
+The LLM does not need to rely solely on its internal knowledge. Relevant literature and uploaded evidence are retrieved first and supplied as context during hypothesis generation and reporting.
+
+### Separate retrieval from generation
+
+Embeddings are used for semantic retrieval, while the LLM is used for reasoning and generation. The numerical embedding itself is never treated as readable text.
+
+### Keep experiments isolated
+
+Generated code is executed separately from the main application when Docker is available, reducing the risk associated with running model-generated Python code.
+
+### Preserve research state
+
+The Neo4j graph provides persistent relationships between papers, concepts, hypotheses, experiments and critiques rather than treating every research run as an isolated conversation.
+
+### Make the process auditable
+
+The provenance log records the actions that produced the final result, making it possible to inspect how a report was constructed.
+
+---
+
+# Limitations
+
+This project is intended as a research prototype rather than a replacement for human researchers.
+
+Current limitations include:
+
+* Literature quality depends on the available OpenAlex metadata and retrieval process.
+* Semantic retrieval does not guarantee that every relevant passage is found.
+* LLM-generated hypotheses and experiments still require human scrutiny.
+* The current experiment environment is focused on Python-based numerical/statistical experiments.
+* The local vector store is designed for lightweight research workflows rather than very large-scale retrieval.
+* The knowledge graph currently represents a relatively small research schema and does not model uncertainty or conflicting evidence explicitly.
+* LLM and external API performance can affect overall runtime.
+
+The system is designed to **assist the research process**, not to treat generated conclusions as automatically correct.
+
+---
+
+# Tech stack
+
+```text
+Python
+Streamlit
+PyTorch
+Sentence Transformers
+NumPy
+Pandas
+SciPy
+scikit-learn
+Neo4j AuraDB
+OpenAlex
+xAI / Grok
+Docker
+```
+
+---
+
+# License
+
+Add your preferred license here before publishing the repository if you intend others to reuse the project.
+
+---
+
+## Author
+
+**Vikash Chandru**
+
+VIT Chennai
+Computer Science & Engineering
